@@ -4,6 +4,7 @@ from pathlib import Path
 
 import requests
 import streamlit as st
+from st_keyup import st_keyup
 from PIL import Image
 
 BASE = Path(__file__).parent
@@ -18,7 +19,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .block-container {max-width: 480px; padding-top: 1rem; padding-bottom: 2rem;}
+    .block-container {max-width: 480px; padding-top: 0.5rem; padding-bottom: 2rem;}
     #MainMenu, footer {visibility: hidden;}
     .total {background:#fff4e0; border:2px solid #ff9b00; border-radius:16px;
             padding:16px; text-align:center; margin:10px 0;}
@@ -132,17 +133,54 @@ def fmt(n, dec=2):
 
 
 # ------------------------------------------------------------------ UI -----
-st.image(str(BASE / "logo.png"), use_container_width=True)
+def brecha(valor, base):
+    """Diferencia porcentual de una tasa respecto al dólar BCV."""
+    if not valor or not base:
+        return "—"
+    p = (valor / base - 1) * 100
+    return f"{'+' if p >= 0 else '−'}{fmt(abs(p), 2)}%"
 
-c_actualizar = st.button("🔄 Actualizar ahora", use_container_width=True)
-if c_actualizar:
-    st.cache_data.clear()
 
+def a_numero(texto):
+    """Convierte lo escrito ('25', '25,5', '1.250,75', '25.5') en número."""
+    t = (texto or "").strip().replace(" ", "")
+    if not t:
+        return 0.0
+    if "," in t:
+        t = t.replace(".", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return 0.0
+
+
+# Logo pequeño y centrado
+_, centro, _ = st.columns([1, 2, 1])
+centro.image(str(BASE / "logo.png"), width="stretch")
+
+# Se leen las tasas (usan lo guardado; solo consultan en su horario)
 usd, h_usd, e1 = leer(_bcv, "usd", periodo_bcv())
 eur, h_eur, e2 = leer(_bcv, "eur", periodo_bcv())
 bin_, h_bin, e3 = leer(_binance)
 
-# Si una tasa no se pudo leer, se permite escribirla a mano
+# ---- Primera pantalla: elegir tasa, escribir el valor y ver el total ----
+elegida = st.radio("Tasa que se cobra", ["Dólar BCV", "Euro BCV", "Binance"], horizontal=True)
+
+texto = st_keyup(
+    "Valor a cobrar (en divisa)",
+    value="",
+    placeholder="Escribe el valor",
+    debounce=100,
+    key="valor",
+)
+valor = a_numero(texto)
+caja_total = st.empty()
+
+# ---- Debajo: tasas, brechas y ajustes ----
+if st.button("🔄 Actualizar ahora", width="stretch"):
+    st.cache_data.clear()
+    st.rerun()
+
 with st.expander("Tasas (editar si alguna no cargó)", expanded=not all([usd, eur, bin_])):
     if usd is None:
         usd = st.number_input("Dólar BCV (Bs.)", min_value=0.0, value=0.0, format="%.4f")
@@ -155,14 +193,6 @@ with st.expander("Tasas (editar si alguna no cargó)", expanded=not all([usd, eu
         st.caption("Detalle: " + " | ".join(errores))
     else:
         st.caption("Todas las tasas se cargaron automáticamente.")
-
-def brecha(valor, base):
-    """Diferencia porcentual de una tasa respecto al dólar BCV."""
-    if not valor or not base:
-        return "—"
-    p = (valor / base - 1) * 100
-    return f"{'+' if p >= 0 else '−'}{fmt(abs(p), 2)}%"
-
 
 cols = st.columns(3)
 chips = [
@@ -182,14 +212,10 @@ st.caption(
 )
 
 tasas = {"Dólar BCV": usd, "Euro BCV": eur, "Binance": bin_}
-elegida = st.radio("Tasa que se cobra", list(tasas), horizontal=True)
-valor = st.number_input("Valor a cobrar (en divisa)", min_value=0.0, value=0.0, step=1.0, format="%.2f")
-
 tasa = tasas[elegida] or 0.0
-total = valor * tasa
-st.markdown(
+caja_total.markdown(
     f'<div class="total"><small>Total en bolívares</small>'
-    f'<div class="big">Bs. {fmt(total)}</div>'
+    f'<div class="big">Bs. {fmt(valor * tasa)}</div>'
     f'<small>{elegida}: {fmt(tasa, 4) if tasa else "sin tasa"}</small></div>',
     unsafe_allow_html=True,
 )

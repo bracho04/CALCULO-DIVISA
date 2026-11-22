@@ -2,3 +2,4 @@ streamlit
 requests
 pillow
 pyDolarVenezuela
+streamlit-keyup
