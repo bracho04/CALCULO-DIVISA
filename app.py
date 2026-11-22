@@ -53,15 +53,39 @@ def periodo_bcv():
     return (ahora if ahora >= corte else ahora - timedelta(days=1)).date().isoformat()
 
 
-@st.cache_data(show_spinner=False)
-def _bcv(code: str, periodo: str):
-    """Tasa BCV (code: 'usd' o 'eur'). Se guarda hasta el próximo corte de las 12:00.
-    Si falla lanza error, y los errores no se guardan: se reintenta en la siguiente visita."""
+def _bcv_dolarapi(code: str) -> float:
+    """BCV oficial desde DolarApi (Venezuela)."""
+    ruta = "dolares" if code == "usd" else "euros"
+    r = requests.get(f"https://ve.dolarapi.com/v1/{ruta}/oficial", timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    valor = d.get("promedio") or d.get("venta") or d.get("compra")
+    if not valor:
+        raise ValueError("DolarApi no devolvió la tasa")
+    return float(valor)
+
+
+def _bcv_pydolar(code: str) -> float:
+    """BCV con la librería pyDolarVenezuela (respaldo)."""
     from pyDolarVenezuela import Monitor
     from pyDolarVenezuela.pages import BCV
 
     monitor = Monitor(BCV, "USD")
-    return float(monitor.get_value_monitors(code, "price")), datetime.now(TZ).strftime("%d/%m %H:%M")
+    return float(monitor.get_value_monitors(code, "price"))
+
+
+@st.cache_data(show_spinner=False)
+def _bcv(code: str, periodo: str):
+    """Tasa BCV (code: 'usd' o 'eur'). Se guarda hasta el próximo corte de las 12:00.
+    Prueba DolarApi y, si falla, pyDolarVenezuela. Si ambas fallan lanza error,
+    y los errores no se guardan: se reintenta en la siguiente visita."""
+    errores = []
+    for fuente in (_bcv_dolarapi, _bcv_pydolar):
+        try:
+            return fuente(code), datetime.now(TZ).strftime("%d/%m %H:%M")
+        except Exception as e:  # noqa: BLE001
+            errores.append(f"{fuente.__name__}: {type(e).__name__}: {e}")
+    raise RuntimeError(" || ".join(errores))
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
